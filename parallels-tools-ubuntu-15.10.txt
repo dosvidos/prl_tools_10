@@ -1,0 +1,78 @@
+diff -Nur "/media/parallels/Parallels Tools/installer/install-kmods.sh" ./installer/install-kmods.sh
+--- "/media/parallels/Parallels Tools/installer/install-kmods.sh"	2015-09-21 12:27:40.000000000 +0400
++++ ./installer/install-kmods.sh	2016-04-12 18:04:02.213928961 +0400
+@@ -218,6 +218,9 @@
+ 			if [ $make_flag -eq 0 ]; then
+ 				# Unpack kernel module sources
+ 				tar -xzf "$KMOD_DIR/$PRL_MOD.$TGZEXT" -C "$KMOD_DIR"
++				pushd "$KMOD_DIR"
++				patch -p1 < $KMOD_DIR/parallels-1.patch
++				popd
+ 
+ 				# Build kernel module
+ 				make -C "$KMOD_DIR" -f Makefile.kmods
+diff -Nur "/media/parallels/Parallels Tools/kmods/parallels-1.patch" ./kmods/parallels-1.patch
+--- "/media/parallels/Parallels Tools/kmods/parallels-1.patch"	1970-01-01 04:00:00.000000000 +0400
++++ ./kmods/parallels-1.patch	2016-04-12 17:29:05.116040332 +0400
+@@ -0,0 +1,61 @@
++diff --git a/prl_fs/SharedFolders/Guest/Linux/prl_fs/inode.c b/prl_fs/SharedFolders/Guest/Linux/prl_fs/inode.c
++index 7e6bb69..cdedd49 100644
++--- a/prl_fs/SharedFolders/Guest/Linux/prl_fs/inode.c
+++++ b/prl_fs/SharedFolders/Guest/Linux/prl_fs/inode.c
++@@ -13,8 +13,8 @@
++ #include <linux/fs.h>
++ #include "prlfs.h"
++ #include <linux/ctype.h>
++-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
++ #include <linux/namei.h>
+++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
++ #else
++ #include <asm/namei.h>
++ #endif
++@@ -650,15 +650,25 @@ out:
++ 	return tgt_path;
++ }
++ 
++-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0)
+++#define compat_follow_link_t const char*
+++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
++ #define compat_follow_link_t void*
++ #else
++ #define compat_follow_link_t int
++ #endif
++ 
++ static compat_follow_link_t prlfs_follow_link(struct dentry *dentry,
+++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0)
+++                                              void  **cookie)
+++#else
++                                               struct nameidata *nd)
+++#endif
++ {
+++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0)
+++    return do_read_symlink(dentry);
+++#else
+++
++ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
++ 	nd_set_link(nd, do_read_symlink(dentry));
++ #endif
++@@ -670,6 +680,7 @@ static compat_follow_link_t prlfs_follow_link(struct dentry *dentry,
++ #else
++ 	return vfs_follow_link(nd, do_read_symlink(dentry));
++ #endif
+++#endif
++ }
++ 
++ #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,0)
++diff --git a/prl_tg/Toolgate/Guest/Linux/prl_tg/prltg.c b/prl_tg/Toolgate/Guest/Linux/prl_tg/prltg.c
++index 9a80a8b..00b4f92 100644
++--- a/prl_tg/Toolgate/Guest/Linux/prl_tg/prltg.c
+++++ b/prl_tg/Toolgate/Guest/Linux/prl_tg/prltg.c
++@@ -21,6 +21,7 @@
++ #include <linux/pagemap.h>
++ #include <linux/proc_fs.h>
++ #include <linux/hash.h>
+++#include <linux/vmalloc.h>
++ #include <asm/uaccess.h>
++ #include <asm/atomic.h>
++ #include <asm/io.h>
